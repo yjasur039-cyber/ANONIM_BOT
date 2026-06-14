@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>X-MS Messenger</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: #0e1621; color: #fff; height: 100vh; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        
+        /* Istalgan telefon va ekran sig'ishi uchun konteyner */
+        .app-container { width: 100%; max-width: 450px; height: 100vh; background: #17212b; display: flex; flex-direction: column; position: relative; border-left: 1px solid #101921; border-right: 1px solid #101921; }
+        
+        .screen { display: none; flex-direction: column; height: 100%; width: 100%; padding: 20px; justify-content: center; }
+        .screen.active { display: flex; }
+        
+        h2 { text-align: center; margin-bottom: 20px; color: #5288c1; font-size: 22px; }
+        input, select { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #24303f; background: #24303f; color: #fff; border-radius: 8px; font-size: 16px; outline: none; }
+        input:focus { border-color: #5288c1; }
+        button { width: 100%; padding: 12px; background: #5288c1; border: none; color: white; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #4172a5; }
+        
+        .btn-secondary { background: #2b394a; margin-top: 10px; }
+        .btn-secondary:hover { background: #202b39; }
+
+        /* Serverlar Ro'yxati */
+        .server-list { flex: 1; overflow-y: auto; margin-bottom: 15px; }
+        .server-item { background: #24303f; padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Chat Interfeysi */
+        .chat-header { background: #17212b; padding: 15px; border-bottom: 1px solid #101921; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 15px; background: #0e1621; display: flex; flex-direction: column; }
+        
+        /* Xabarlar ko'rinishi */
+        .msg-wrapper { display: flex; align-items: flex-start; margin-bottom: 12px; max-width: 80%; }
+        .msg-wrapper.left { align-self: flex-start; }
+        .msg-wrapper.right { align-self: flex-end; flex-direction: row-reverse; }
+        
+        .user-avatar { width: 35px; height: 35px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: #fff; flex-shrink: 0; }
+        
+        .msg-bubble { padding: 10px 14px; border-radius: 12px; margin: 0 8px; font-size: 15px; word-break: break-word; line-height: 1.4; }
+        .left .msg-bubble { background: #182533; color: #fff; }
+        .right .msg-bubble { background: #2b5278; color: #fff; }
+
+        .chat-input-area { padding: 10px; background: #17212b; display: flex; gap: 10px; align-items: center; }
+        .chat-input-area input { margin-bottom: 0; flex: 1; }
+        .chat-input-area button { width: auto; padding: 12px 20px; }
+
+        /* Surovnoma va bildirishnomalar */
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; justify-content: center; align-items: center; padding: 20px; z-index: 10; }
+        .modal { background: #17212b; padding: 20px; border-radius: 12px; width: 100%; max-width: 320px; text-align: center; }
+        .modal h3 { margin-bottom: 15px; }
+        .modal-buttons { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-green { background: #2ecc71; }
+        .btn-red { background: #e74c3c; }
+        
+        /* Rad etilganda qizarish */
+        .rejected-bg { animation: redFlash 1.5s ease-forward; }
+        @keyframes redFlash { 0% { background: #17212b; } 50% { background: #5c1d1d; } 100% { background: #17212b; } }
+    </style>
+</head>
+<body>
+
+<div class="app-container" id="app">
+    
+    <div class="screen active" id="screen-login">
+        <h2>X-MS Messenger</h2>
+        <input type="text" id="login-name" placeholder="Profilingizdagi ismni kiriting...">
+        <button onclick="handleLogin()">Tizimga kirish</button>
+        <p id="login-error" style="color: #e74c3c; text-align:center; margin-top:10px; font-size:14px; display:none;">Xato! Profilingizdagi to'g'ri ismni kiriting.</p>
+    </div>
+
+    <div class="screen" id="screen-menu">
+        <h2 id="menu-welcome">Xush kelibsiz</h2>
+        <button onclick="switchScreen('screen-create')">1. Server Ochish</button>
+        <button class="btn-secondary" onclick="openJoinScreen()">2. Serverga Qo'shilish</button>
+    </div>
+
+    <div class="screen" id="screen-create">
+        <h2>Server Sozlamalari</h2>
+        <label>Maksimal foydalanuvchilar soni:</label>
+        <select id="server-slots">
+            <option value="2">2 kishi</option>
+            <option value="3">3 kishi</option>
+            <option value="5">5 kishi</option>
+            <option value="10">10 kishi</option>
+        </select>
+        <button onclick="handleCreateServer()">Serverni Faollashtirish</button>
+        <button class="btn-secondary" onclick="switchScreen('screen-menu')">Orqaga</button>
+    </div>
+
+    <div class="screen" id="screen-join">
+        <h2>Ochiq Serverlar</h2>
+        <input type="text" id="search-server-id" placeholder="8 xonali ID orqali qidirish...">
+        <button onclick="handleSearchServer()">ID bo'yicha qidirish</button>
+        <div style="margin: 15px 0; text-align:center; color:#aaa;">Yoki mavjudlaridan birini tanlang:</div>
+        <div class="server-list" id="servers-container"></div>
+        <button class="btn-secondary" onclick="switchScreen('screen-menu')">Orqaga</button>
+    </div>
+
+    <div class="screen" id="screen-chat" style="padding:0; justify-content:flex-start;">
+        <div class="chat-header">
+            <span id="chat-server-title">ID: 00000000</span>
+            <button style="width:auto; padding:5px 10px; background:#e74c3c;" onclick="leaveChat()">Chiqish</button>
+        </div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-area">
+            <input type="text" id="chat-input" placeholder="Xabar yozing...">
+            <button onclick="sendMessage()">Yuborish</button>
+        </div>
+    </div>
+
+    <div class="overlay" id="request-overlay">
+        <div class="modal">
+            <h3 style="color:#5288c1;">Kirish So'rovi!</h3>
+            <p id="request-text">Foydalanuvchi serveringizga kirmoqchi.</p>
+            <div class="modal-buttons">
+                <button class="btn-green" onclick="acceptRequest()">✓ Kiritish</button>
+                <button class="btn-red" onclick="rejectRequest()">✕ Rad etish</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Global xotira simulyatsiyasi (Barcha jarayonlarni brauzer xotirasida boshqarish)
+    let currentUser = { name: "", mockId: "", color: "" };
+    let servers = {}; 
+    let currentServerId = null;
+    let pendingRequest = null;
+    
+    const COLORS = ["#3498db", "#2ecc71", "#e67e22", "#9b59b6", "#1abc9c", "#f1c40f", "#e74c3c"];
+
+    function handleLogin() {
+        let nameInput = document.getElementById("login-name").value.trim();
+        if(nameInput === "") {
+            document.getElementById("login-error").style.display = "block";
+            return;
+        }
+        currentUser.name = nameInput;
+        currentUser.mockId = Math.floor(1000 + Math.random() * 9000); // Botdagi 4 xonali ID simulyatsiyasi
+        
+        document.getElementById("menu-welcome").innerText = `Suhbatdosh: ${currentUser.name}`;
+        switchScreen('screen-menu');
+    }
+
+    function switchScreen(screenId) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(screenId).classList.add('active');
+    }
+
+    function handleCreateServer() {
+        let slots = parseInt(document.getElementById("server-slots").value);
+        let serverId = Math.floor(10000000 + Math.random() * 90000000).toString(); // 8 xonali ID
+        
+        let assignedColor = COLORS[0]; 
+
+        servers[serverId] = {
+            id: serverId,
+            creator: currentUser.name,
+            maxSlots: slots,
+            users: [{ name: currentUser.name, id: currentUser.mockId, color: assignedColor }],
+            messages: []
+        };
+
+        currentUser.color = assignedColor;
+        currentServerId = serverId;
+        
+        openChat(serverId);
+    }
+
+    function openJoinScreen() {
+        renderServers();
+        switchScreen('screen-join');
+    }
+
+    function renderServers() {
+        let container = document.getElementById("servers-container");
+        container.innerHTML = "";
+        
+        Object.values(servers).forEach(srv => {
+            if(srv.users.length >= srv.maxSlots) return;
+            let div = document.createElement("div");
+            div.className = "server-item";
+            div.innerHTML = `
+                <div>
+                    <strong>ID: ${srv.id}</strong><br>
+                    <small>Dasturchi: ${srv.creator} (${srv.users.length}/${srv.maxSlots})</small>
+                </div>
+                <button style="width:auto; padding:8px 15px;" onclick="requestToJoin('${srv.id}')">Kirish</button>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function handleSearchServer() {
+        let searchId = document.getElementById("search-server-id").value.trim();
+        if(servers[searchId]) {
+            requestToJoin(searchId);
+        } else {
+            alert("❌ Bunday 8 xonali server ID topilmadi!");
+        }
+    }
+
+    function requestToJoin(serverId) {
+        let targetServer = servers[serverId];
+        if(!targetServer) return;
+
+        if(targetServer.users.length >= targetServer.maxSlots) {
+            alert("❌ Server to'la! Joy qolmagan.");
+            return;
+        }
+
+        // Rang tanlash (Serverda takrorlanmasligi shart)
+        let usedColors = targetServer.users.map(u => u.color);
+        let availableColor = COLORS.find(c => !usedColors.includes(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+        currentUser.color = availableColor;
+
+        pendingRequest = { serverId: serverId, user: { name: currentUser.name, id: currentUser.mockId, color: currentUser.color } };
+
+        // Admin (Server yaratuvchisi) ekranida so'rovni ko'rsatish simulyatsiyasi
+        document.getElementById("request-text").innerText = `Foydalanuvchi "${currentUser.name}" (ID: ${currentUser.mockId}) serveringizga kirishga ruxsat so'ramoqda.`;
+        document.getElementById("request-overlay").style.display = "flex";
+    }
+
+    function acceptRequest() {
+        document.getElementById("request-overlay").style.display = "none";
+        if(!pendingRequest) return;
+
+        let srv = servers[pendingRequest.serverId];
+        srv.users.push(pendingRequest.user);
+        currentServerId = pendingRequest.serverId;
+        
+        openChat(currentServerId);
+        pendingRequest = null;
+    }
+
+    function rejectRequest() {
+        document.getElementById("request-overlay").style.display = "none";
+        pendingRequest = null;
+        
+        // Ekran qizarishi effekti
+        let appDiv = document.getElementById("app");
+        appDiv.classList.add("rejected-bg");
+        alert("🔴 Kirish rad etildi!");
+        setTimeout(() => appDiv.classList.remove("rejected-bg"), 1500);
+    }
+
+    function openChat(serverId) {
+        currentServerId = serverId;
+        document.getElementById("chat-server-title").innerText = `Server ID: ${serverId}`;
+        switchScreen('screen-chat');
+        updateMessages();
+        
+        // Avtomatik yangilab turish simulyatsiyasi
+        clearInterval(window.chatInterval);
+        window.chatInterval = setInterval(updateMessages, 1000);
+    }
+
+    function updateMessages() {
+        if(!currentServerId || !servers[currentServerId]) return;
+        let chatBox = document.getElementById("chat-messages");
+        chatBox.innerHTML = "";
+        
+        servers[currentServerId].messages.forEach(msg => {
+            let isMe = msg.userName === currentUser.name;
+            let wrapper = document.createElement("div");
+            wrapper.className = `msg-wrapper ${isMe ? 'right' : 'left'}`;
+            
+            wrapper.innerHTML = `
+                <div class="user-avatar" style="background:${msg.color}; border-color:${msg.color};" onclick="showProfile('${msg.userName}', '${msg.userId}')">
+                    ${msg.userName.charAt(0).toUpperCase()}
+                </div>
+                <div class="msg-bubble">
+                    ${msg.text}
+                </div>
+            `;
+            chatBox.appendChild(wrapper);
+        });
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function sendMessage() {
+        let inp = document.getElementById("chat-input");
+        let txt = inp.value.trim();
+        if(txt === "" || !currentServerId) return;
+
+        servers[currentServerId].messages.push({
+            userName: currentUser.name,
+            userId: currentUser.mockId,
+            color: currentUser.color,
+            text: txt
+        });
+
+        inp.value = "";
+        updateMessages();
+    }
+
+    function showProfile(name, id) {
+        alert(`👤 Foydalanuvchi ma'lumotlari:\n\nUsername/Ism: ${name}\nBot ichidagi ID: ${id}`);
+    }
+
+    function leaveChat() {
+        clearInterval(window.chatInterval);
+        if(currentServerId && servers[currentServerId]) {
+            servers[currentServerId].users = servers[currentServerId].users.filter(u => u.name !== currentUser.name);
+        }
+        currentServerId = null;
+        switchScreen('screen-menu');
+    }
+</script>
+
+</body>
+</html>
