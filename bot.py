@@ -1,172 +1,135 @@
-import asyncio
+import os
 import logging
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiohttp import web  # Render tekin serveri porti uchun
+from aiogram import Bot, Dispatcher, types
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-# 🤖 Bot sozlamalari
-API_TOKEN = '8971349135:AAFQA40bJf45vQwb7Oe3yxtfQ4R-cRciDCg'
-ADMIN_ID = 6198817749  # ✅ Sizning Telegram ID raqamingiz
-
-# Logging (Bot ishini konsolda kuzatish uchun)
+# Loggingni sozlaymiz (Render-da xatoliklarni ko'rish uchun shart)
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+# --- ⚙️ SOZLAMALAR ---
+# Token va Admin ID ni Render platformasidagi Environment Variables (muhit o'zgaruvchilari) ichiga kiriting.
+# Agar topilmasa, pastdagi qo'shtirnoq ichiga yozib qo'yishingiz ham mumkin.
+BOT_TOKEN = os.getenv("BOT_TOKEN", "BU_YERGA_BOT_TOKENINI_YOZING")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "BU_YERGA_TELEGRAM_ID_INGIZNI_YOZING"))
 
-# FSM (Bot xotirasida holatlarni saqlash tizimi)
-class AnonimChat(StatesGroup):
-    tanlov_kutish = State()
-    id_kutish = State()
-    url_kutish = State()
-    tel_kutish = State()
-    suhbat_faol = State()
+# Render uchun Webhook sozlamalari
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render o'zi avtomatik beradi
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBAPP_HOST = "0.0.0.0"
+WEBAPP_PORT = int(os.getenv("PORT", 8080))
 
-# Suhbatdoshlar mosligi uchun vaqtinchalik xotira
-active_chats = {}
-
-# 🛠️ KLAVIATURA (Admin uchun tanlov tugmalari)
-def get_admin_keyboard():
-    buttons = [
-        [types.KeyboardButton(text="🆔 ID orqali ulanish")],
-        [types.KeyboardButton(text="🔗 Username (URL) orqali")],
-        [types.KeyboardButton(text="📞 Telefon raqam orqali")]
-    ]
-    return types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+# Bot va Dispatcher ob'ektlarini yaratamiz
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
 
-# ==================== ADMIN BUYRUQLARI ====================
+# --- 📝 HANDLERLAR (BUYRUKLAR) ---
 
-# Admin botga kirganda
-@dp.message(Command("start"), F.from_user.id == ADMIN_ID)
-async def admin_welcome(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "👋 Salom Admin! Siz mutlaqo anonim rejimdasiz.\n"
-        "Kimga yozmoqchisiz? Quyidagilardan birini tanlang:",
-        reply_markup=get_admin_keyboard()
-    )
-    await state.set_state(AnonimChat.tanlov_kutish)
-
-# Admin tanlov qilganda
-@dp.message(AnonimChat.tanlov_kutish, F.from_user.id == ADMIN_ID)
-async def admin_choice(message: types.Message, state: FSMContext):
-    matn = message.text
-    
-    if "🆔 ID" in matn:
-        await message.answer("Suhbatdoshning Telegram **ID raqamini** yozing:", reply_markup=types.ReplyKeyboardRemove())
-        await state.set_state(AnonimChat.id_kutish)
-    elif "🔗 Username" in matn:
-        await message.answer("Suhbatdoshning **Username (yoki URL)** manzilini yozing (Masalan: @username):", reply_markup=types.ReplyKeyboardRemove())
-        await state.set_state(AnonimChat.url_kutish)
-    elif "📞 Telefon" in matn:
-        await message.answer("Suhbatdoshning **Telefon raqamini** kiriting (Masalan: +998901234567):", reply_markup=types.ReplyKeyboardRemove())
-        await state.set_state(AnonimChat.tel_kutish)
+# /start buyrug'i uchun handler
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        await message.answer(
+            "👋 **Assalomu alaykum, Admin!**\n\nBu sizning anonim botingiz. Foydalanuvchilardan kelgan xabarlar shu yerga tushadi. "
+            "Xabar ostidagi tugmani bosib, foydalanuvchi ID-sini osongina olishingiz mumkin.",
+            parse_mode=ParseMode.MARKDOWN
+        )
     else:
-        await message.answer("Iltimos, pastdagi tugmalardan birini tanlang.")
+        await message.answer(
+            "👋 **Anonim botga xush kelibsiz!**\n\nAdminga yubormoqchi bo'lgan xabaringizni (matn, rasm yoki fikr) yozib yuboring. "
+            "Sizning shaxsingiz mutlaqo yashirin qoladi! 🥷"
+        )
 
-# ID kiritilganda ulanish
-@dp.message(AnonimChat.id_kutish, F.from_user.id == ADMIN_ID)
-async def connect_by_id(message: types.Message, state: FSMContext):
-    target_id = message.text.strip()
-    
-    if not target_id.isdigit():
-        await message.answer("❌ ID faqat raqamlardan iborat bo'lishi kerak. Qayta kiriting:")
+
+# Anonim xabarlarni qabul qilib adminga yo'naltirish qismi
+@dp.message()
+async def handle_anonymous_message(message: types.Message):
+    # Agar admin o'zi yozayotgan bo'lsa, xabarni o'ziga qayta yubormaydi
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("⚠️ Bu sizning admin panelingiz. Foydalanuvchilarga javob berish uchun ularning ID-sidan foydalaning.")
         return
-        
-    target_id = int(target_id)
-    
-    try:
-        # Foydalanuvchi botga start bosganini tekshirish uchun "typing" yuboramiz
-        await bot.send_chat_action(chat_id=target_id, action="typing")
-        
-        # Aloqani ulash
-        await state.update_data(current_target=target_id)
-        active_chats[target_id] = ADMIN_ID
-        
-        await message.answer(f"✅ Ulanish muvaffaqiyatli! (ID: {target_id})\nEndi nima yozsangiz unga ANONIM tarzda boradi.\n\nSuhbatni tugatish uchun /stop deb yozing.")
-        await state.set_state(AnonimChat.suhbat_faol)
-        
-    except Exception:
-        await message.answer("❌ Bu foydalanuvchi botga ulanmagan yoki ID xato.\nEslatma: Bot birinchi bo'lib begona odamga yozolmaydi. U odam botga kirib /start bosgan bo'lishi shart.\n\nQayta urinish uchun /start bosing.")
-        await state.clear()
 
-# Username yoki Telefon raqami kiritilganda (Telegram API cheklovi)
-@dp.message(AnonimChat.url_kutish, F.from_user.id == ADMIN_ID)
-@dp.message(AnonimChat.tel_kutish, F.from_user.id == ADMIN_ID)
-async def connect_by_other(message: types.Message, state: FSMContext):
-    await message.answer(
-        "⚠️ **Telegram API Cheklovi:**\n"
-        "Botlar to'g'ridan-to'g'ri telefon raqami yoki begona Username orqali odam topa olmaydi.\n\n"
-        "Suhbat boshlash uchun baribir o'sha odamning **Raqamli ID'si** kerak bo'ladi.\n"
-        "Iltimos, maqsadli foydalanuvchining ID raqamini topib, /start buyrug'i orqali qayta urining."
+    # 1. Chiroyli Inline tugma yasaymiz va ichiga foydalanuvchi ID-sini berkitamiz
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(
+            text="🆔 ID-ni nusxalash", 
+            callback_data=f"get_id_{message.from_user.id}"
+        )
     )
-    await state.clear()
 
-# Suhbatni tugatish buyrug'i
-@dp.message(Command("stop"), AnonimChat.suhbat_faol, F.from_user.id == ADMIN_ID)
-async def stop_chat(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    target_id = data.get("current_target")
-    
-    if target_id in active_chats:
-        del active_chats[target_id]
+    # 2. Xabarni turi bo'yicha adminga chiroyli qilib uzatamiz
+    try:
+        if message.text:
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🥷 **Yangi anonim xabar:**\n\n{message.text}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=builder.as_markup()
+            )
+        else:
+            # Agar rasm, video yoki boshqa media bo'lsa, uni adminga caption (izoh) bilan yuboradi
+            await message.copy_to(
+                chat_id=ADMIN_ID,
+                caption=f"🥷 **Yangi anonim media xabar!**",
+                reply_markup=builder.as_markup()
+            )
         
-    await state.clear()
-    await message.answer("📴 Suhbat yakunlandi. Yangi suhbat boshlash uchun /start bosing.", reply_markup=get_admin_keyboard())
+        # Foydalanuvchiga tasdiq xabari
+        await message.answer("Xabaringiz anonim tarzda adminga yetkazildi! 🤫")
+        
+    except Exception as e:
+        logging.error(f"Xabar yuborishda xatolik: {e}")
+        await message.answer("❌ Xabar yuborishda xatolik yuz berdi. Keyinroq qayta urinib ko'ring.")
 
 
-# ==================== XABARLARNI YO'NALTIRISH (BRIDGE) ====================
-
-# Admindan foydalanuvchiga (Klonlab yuborish)
-@dp.message(AnonimChat.suhbat_faol, F.from_user.id == ADMIN_ID)
-async def forward_from_admin(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    target_id = data.get("current_target")
+# 3. Admin tugmani bosganda ID-ni chiroyli xabar qilib chiqaradigan qism
+@dp.callback_query(lambda c: c.data.startswith('get_id_'))
+async def show_user_id_to_admin(callback_query: types.CallbackQuery):
+    # callback_data ichidan user_id ni ajratib olamiz
+    user_id = callback_query.data.split('_')[2]
     
-    try:
-        # copy_message xabarni klonlaydi (Sizning profilingiz mutlaqo yashirin qoladi)
-        await bot.copy_message(chat_id=target_id, from_chat_id=ADMIN_ID, message_id=message.message_id)
-    except Exception:
-        await message.answer(f"❌ Xabarni yuborib bo'lmadi. Suhbatdosh botni bloklagan bo'lishi mumkin.")
-
-# Foydalanuvchidan Adminga
-@dp.message(F.from_user.id != ADMIN_ID)
-async def forward_to_admin(message: types.Message):
-    user_id = message.from_user.id
+    # Adminga ID-ni alohida xabar qilib yuboramiz. 
+    # ` ` belgilari ichidagi ID ustiga bir marta bosa, avtomatik nusxalanadi (copy bo'ladi).
+    await callback_query.message.answer(
+        text=f"👤 **Foydalanuvchi ID raqami:**\n`{user_id}`\n\nUshbu ID-ni nusxalab, unga javob yuborishingiz mumkin.",
+        parse_mode=ParseMode.MARKDOWN
+    )
     
-    if user_id in active_chats:
-        await bot.send_message(chat_id=ADMIN_ID, text=f"📩 **[Suhbatdosh ID: {user_id}]:**")
-        await bot.copy_message(chat_id=ADMIN_ID, from_chat_id=user_id, message_id=message.message_id)
+    # Tugma muzlab qolmasligi uchun Telegramga javob qaytaramiz
+    await callback_query.answer()
+
+
+# --- 🚀 BOTNI ISHGA TUSHIRISH (RENDER & LOCAL) ---
+
+async def on_startup(bot: Bot) -> None:
+    if RENDER_EXTERNAL_URL:
+        await bot.set_webhook(url=f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}")
+        logging.info(f"Webhook o'rnatildi: {RENDER_EXTERNAL_URL}{WEBHOOK_PATH}")
     else:
-        await message.answer("🤫 Bu maxfiy anonim bot. Hozircha siz bilan hech kim aloqaga chiqqani yo'q.")
+        logging.info("Bot lokal rejimda (Polling) ishga tushmoqda...")
 
+def main():
+    if RENDER_EXTERNAL_URL:
+        # Render platformasida Webhook rejimida ishga tushirish
+        app = web.Application()
+        webhook_requests_handler = SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot
+        )
+        webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+        setup_application(app, dp, bot=bot)
+        
+        dp.startup.register(on_startup)
+        web.run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
+    else:
+        # Kompyuterda sinash uchun oddiy Polling rejimi
+        dp.startup.register(on_startup)
+        dp.run_polling(bot)
 
-# ==================== RENDER TEKIN PORTI VA BOTNI ISHGA TUSHIRISH ====================
-
-# Render tekin xizmati so'raydigan mini veb-sahifa funksiyasi
-async def handle(request):
-    return web.Response(text="Bot is running completely free on Render!")
-
-async def main():
-    print("🚀 Bot muvaffaqiyatli ishga tushdi...")
-    
-    # Render tekin serverini aldaydigan orqa fon portini yoqamiz
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 10000)
-    asyncio.create_task(site.start())
-    
-    # Bot pollingini ishga tushirish
-    await dp.start_polling(bot)
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("Bot to'xtatildi.")
+if __name__ == "__main__":
+    main()
