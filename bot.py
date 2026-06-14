@@ -8,24 +8,25 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiohttp import web
 
+# 🤖 Bot sozlamalari
 API_TOKEN = '8971349135:AAFQA40bJf45vQwb7Oe3yxtfQ4R-cRciDCg'
-ADMIN_ID = 6198817749
+ADMIN_ID = 6198817749  # ✅ Hech qanday os.getenv-larsiz, to'g'ridan-to'g'ri raqam o'rnatildi
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Papkalarni yaratish
+# 📁 Ma'lumotlarni saqlash uchun papka tizimi
 DATA_DIR = "users_data"
-os.makedirs(DATA_DIR, dict_mode=0o777, exist_ok=True)
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
 
-# Tizim fayllari yo'llari
 COUNTER_FILE = os.path.join(DATA_DIR, "total_users.txt")
 ID_MAP_FILE = os.path.join(DATA_DIR, "id_mapping.txt")
 
 message_tracker = {}
 
-# 📁 YORDAMCHI FUNKSIYALAR (FAYLLAR BILAN ISHLASH)
+# 📁 FAYLLAR BILAN ISHLASH FUNKSIYALARI
 def get_total_users_count():
     if not os.path.exists(COUNTER_FILE):
         return 0
@@ -42,17 +43,17 @@ def increment_users_count():
     return count
 
 def generate_unique_4digit_id(tg_id):
-    # Avval berilgan ID bormi tekshirish
+    # Avval berilgan maxsus ID bor-yo'qligini tekshirish
     if os.path.exists(ID_MAP_FILE):
-        with open(ID_MAP_FILE, "r") as f:
+        with open(ID_MAP_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 if f"{tg_id}:" in line:
                     return line.strip().split(":")[1]
     
-    # Yangi 4 xonali ID yaratish
+    # Yangi 4 xonali band bo'lmagan ID yaratish
     existing_ids = set()
     if os.path.exists(ID_MAP_FILE):
-        with open(ID_MAP_FILE, "r") as f:
+        with open(ID_MAP_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 if ":" in line:
                     existing_ids.add(line.strip().split(":")[1])
@@ -60,142 +61,159 @@ def generate_unique_4digit_id(tg_id):
     while True:
         new_id = str(random.randint(1000, 9999))
         if new_id not in existing_ids:
-            with open(ID_MAP_FILE, "a") as f:
-                f.append(f"{tg_id}:{new_id}\n")
+            with open(ID_MAP_FILE, "a", encoding="utf-8") as f:
+                f.write(f"{tg_id}:{new_id}\n")
             return new_id
 
-def save_user_txt(tg_id, info_dict):
+def save_user_info_to_txt(tg_id, info):
     file_path = os.path.join(DATA_DIR, f"{tg_id}.txt")
     with open(file_path, "w", encoding="utf-8") as f:
-        for key, val in info_dict.items():
-            f.write(f"{key}: {val}\n")
+        for k, v in info.items():
+            f.write(f"{k}: {v}\n")
 
-def read_user_txt(tg_id):
+def read_user_info_from_txt(tg_id):
     file_path = os.path.join(DATA_DIR, f"{tg_id}.txt")
     if not os.path.exists(file_path):
         return {}
-    data = {}
+    info = {}
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
             if ": " in line:
                 k, v = line.strip().split(": ", 1)
-                data[k] = v
-    return data
+                info[k] = v
+    return info
+
+def append_message_log(tg_id, message_text):
+    file_path = os.path.join(DATA_DIR, f"{tg_id}.txt")
+    if os.path.exists(file_path):
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(f"Yozgan xabari: {message_text}\n")
 
 # ==================== HANDLERLAR ====================
 
+# ADMIN START BOSGANDA
 @dp.message(Command("start"), F.from_user.id == ADMIN_ID)
 async def admin_welcome(message: types.Message):
-    await message.answer("👋 Salom Admin! Bot parallel Reply tizimida ishlamoqda.")
+    await message.answer(
+        "👋 **Salom Admin (OTA)! Loyiha 100% xatosiz ishga tushdi.**\n\n"
+        "Foydalanuvchilar yozgan xabarlarga shunchaki **Reply** (Javob berish) tugmasi orqali javob yozing."
+    )
 
+# USER START BOSGANDA
 @dp.message(Command("start"), F.from_user.id != ADMIN_ID)
 async def user_welcome(message: types.Message):
     tg_id = message.from_user.id
-    existing_data = read_user_txt(tg_id)
+    user_data = read_user_info_from_txt(tg_id)
     
-    # Agar birinchi marta kirayotgan bo'lsa
-    if not existing_data:
-        user_number = increment_users_count()
+    # Agar foydalanuvchi tizimda umuman bo'lmasa (Yangi user)
+    if not user_data:
+        user_num = increment_users_count()
         custom_id = generate_unique_4digit_id(tg_id)
         
-        user_info = {
-            "Nomeri": user_number,
-            "Bot_ID": custom_id,
+        user_data = {
+            "Nechinchi_User": user_num,
+            "Maxsus_Bot_ID": custom_id,
             "Telegram_ID": tg_id,
-            "Ism": message.from_user.first_name or "Mavjud emas",
-            "Familiya": message.from_user.last_name or "Mavjud emas",
+            "Ism": message.from_user.first_name or "Kiritilmagan",
+            "Familiya": message.from_user.last_name or "Kiritilmagan",
             "Username": f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas",
-            "Telefon": "Ulashilmagan"
+            "Telefon": "Ulashilmagan (Kutilmoqda)"
         }
-        save_user_txt(tg_id, user_info)
+        save_user_info_to_txt(tg_id, user_data)
     else:
-        custom_id = existing_data.get("Bot_ID")
-        user_number = existing_data.get("Nomeri")
-    
-    # Telefon so'rash tugmasi
+        custom_id = user_data.get("Maxsus_Bot_ID")
+        user_num = user_data.get("Nechinchi_User")
+
+    # Kontakt ulashish tugmasi
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="📞 Telefon raqamni yuborish", request_contact=True))
     
-    user_text = (
-        f"Assalomu alaykum bizning Anonim nomlik bo'timizga xush kelibsiz \n"
-        f"Sizning maxsus ID raqamingiz: {custom_id}\n\n"
-        f"bu bot haqida:agar siz istalgan habar yozsangiz u adminga yani developer ,OTA ga boradi "
-        f"u sizning yozgan habaringizni o'qiydi va javob yozadi agar siz botga spam bersangiz yoki "
-        f"negativ habar yozsangiz telegram sizni bloklaydi shunki ushbu bot Telegtam bilan hamkorlikda qurilgan "
-        f"OTA bilan maroqli suhbat tilaymiz!!!\n"
-        f"!!!ogohlantirish<<ushbu loyiha 49.9% telegramniki>>\n\n"
-        f"⚠️ Iltimos, bot to'liq ishlashi uchun quyidagi tugma orqali telefon raqamingizni yuboring:"
+    welcome_text = (
+        "Assalomu alaykum bizning Anonim nomlik bo'timizga xush kelibsiz \n"
+        f"Sizning maxsus tizimdagi ID raqamingiz: {custom_id}\n\n"
+        "bu bot haqida:agar siz istalgan habar yozsangiz u adminga yani developer ,OTA ga boradi "
+        "u sizning yozgan habaringizni o'qiydi va javob yozadi agar siz botga spam bersangiz yoki "
+        "negativ habar yozsangiz telegram sizni bloklaydi shunki ushbu bot Telegtam bilan hamkorlikda qurilgan "
+        "OTA bilan maroqli suhbat tilaymiz!!!\n"
+        "!!!ogohlantirish<<ushbu loyiha 49.9% telegramniki>>\n\n"
+        "⚠️ Davom etish uchun pastdagi tugma orqali telefon raqamingizni tasdiqlang:"
     )
-    await message.answer(user_text, reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer(welcome_text, reply_markup=builder.as_markup(resize_keyboard=True))
 
-@dp.message(F.contact)
-async def get_user_contact(message: types.Message):
+# FOYDALANUVCHI TELEFON RAQAMINI YUBORGANDA
+@dp.message(F.contact, F.from_user.id != ADMIN_ID)
+async def get_user_phone(message: types.Message):
     tg_id = message.from_user.id
-    existing_data = read_user_txt(tg_id)
+    user_data = read_user_info_from_txt(tg_id)
     
-    if existing_data:
-        existing_data["Telefon"] = message.contact.phone_number
-        save_user_txt(tg_id, existing_data)
+    if user_data:
+        phone = message.contact.phone_number
+        user_data["Telefon"] = phone
+        save_user_info_to_txt(tg_id, user_data)
         
-        # Adminga to'liq ma'lumotni yuborish
+        # Adminga srazy bildirishnoma yuborish
         admin_alert = (
             f"🔔 **Yangi foydalanuvchi ro'yxatdan o'tdi!**\n\n"
-            f"🔢 Nechinchi user: {existing_data.get('Nomeri')}-mijoz\n"
-            f"🆔 Maxsus ID: {existing_data.get('Bot_ID')}\n"
-            f"👤 Ism: {existing_data.get('Ism')}\n"
-            f"👥 Familiya: {existing_data.get('Familiya')}\n"
-            f"🌐 Username: {existing_data.get('Username')}\n"
-            f"📞 Telefon: {message.contact.phone_number}\n"
-            f"📱 Telegram ID: `{tg_id}`"
+            f"🔢 Mijoz tartibi: {user_data.get('Nechinchi_User')}-user\n"
+            f"🆔 Berilgan ID: {user_data.get('Maxsus_Bot_ID')}\n"
+            f"👤 Ism: {user_data.get('Ism')}\n"
+            f"👥 Familiya: {user_data.get('Familiya')}\n"
+            f"🌐 Username: {user_data.get('Username')}\n"
+            f"📞 Telefon: {phone}\n"
+            f"📱 Haqiqiy TG ID: `{tg_id}`"
         )
         await bot.send_message(chat_id=ADMIN_ID, text=admin_alert)
-        await message.answer("✅ Rahmat! Ma'lumotlaringiz tasdiqlandi. Endi anonim xabar yo'llashingiz mumkin.", reply_markup=types.ReplyKeyboardRemove())
+        await message.answer("✅ Rahmat! Telefon raqamingiz muvaffaqiyatli tasdiqlandi. Endi xabar yuborishingiz mumkin.", reply_markup=types.ReplyKeyboardRemove())
 
-# ADMIN JAVOB BERGANDA
+# ADMIN JAVOB BERGANDA (REPLY)
 @dp.message(F.from_user.id == ADMIN_ID, F.reply_to_message)
-async def admin_reply_to_user(message: types.Message):
+async def admin_reply(message: types.Message):
     reply_id = message.reply_to_message.message_id
     user_id = message_tracker.get(reply_id)
     
     if not user_id:
-        await message.answer("❌ Xabar egasi topilmadi.")
+        await message.answer("❌ Kechirasiz, ushbu xabar egasi topilmadi (Eski xabar yoki bot o'chib yongan).")
         return
     try:
         await bot.copy_message(chat_id=user_id, from_chat_id=ADMIN_ID, message_id=message.message_id)
-        await message.answer("✅ Javob yetkazildi.")
+        await message.answer("✅ Javobingiz foydalanuvchiga yetkazildi.")
     except Exception:
-        await message.answer("❌ Foydalanuvchi botni bloklagan.")
+        await message.answer("❌ Xabarni yuborib bo'lmadi. Foydalanuvchi botni bloklagan bo'lishi mumkin.")
 
 # USERDAN ADMINGA XABAR KELGANDA
 @dp.message(F.from_user.id != ADMIN_ID)
 async def forward_to_admin(message: types.Message):
     tg_id = message.from_user.id
-    user_data = read_user_txt(tg_id)
-    custom_id = user_data.get("Bot_ID", "Noma'lum")
-    user_num = user_data.get("Nomeri", "?")
+    user_data = read_user_info_from_txt(tg_id)
     
-    # TXT faylga u nima deb yozganini qo'shib qo'yamiz (Log sifatida)
-    file_path = os.path.join(DATA_DIR, f"{tg_id}.txt")
-    if os.path.exists(file_path):
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(f"Xabar: {message.text or '[Media/Stiker]'}\n")
-
+    if not user_data:
+        await message.answer("⚠️ Iltimos, avval /start buyrug'ini bosing.")
+        return
+        
+    custom_id = user_data.get("Maxsus_Bot_ID", "Noma'lum")
+    user_num = user_data.get("Nechinchi_User", "?")
+    
+    # Fayl ichiga yozgan gapini qo'shib qo'yamiz (TXT papkaga yig'ish)
+    append_message_log(tg_id, message.text or "[Media/Stiker]")
+    
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🆔 ID nusxalash", callback_data=f"get_id_{tg_id}"))
+    builder.row(types.InlineKeyboardButton(text="🆔 TG ID-ni nusxalash", callback_data=f"get_id_{tg_id}"))
     
-    await bot.send_message(chat_id=ADMIN_ID, text=f"📩 **User №{user_num} (ID: {custom_id}) dan xabar:**")
+    await bot.send_message(chat_id=ADMIN_ID, text=f"📩 **User №{user_num} (Maxsus ID: {custom_id}) dan xabar:**")
     sent_msg = await bot.copy_message(chat_id=ADMIN_ID, from_chat_id=tg_id, message_id=message.message_id, reply_markup=builder.as_markup())
     
+    # Javob berish zanjiriga saqlash
     message_tracker[sent_msg.message_id] = tg_id
     await message.answer("🤫 Xabaringiz anonim tarzda adminga yuborildi!")
 
 @dp.callback_query(lambda c: c.data.startswith('get_id_'))
 async def show_id_to_admin(callback_query: types.CallbackQuery):
     user_id = callback_query.data.split('_')[2]
-    await callback_query.message.answer(f"👤 Haqiqiy TG ID: `{user_id}`")
+    await callback_query.message.answer(f"👤 Ushbu foydalanuvchining haqiqiy TG ID raqami:\n`{user_id}`")
     await callback_query.answer()
 
-async def handle(request): return web.Response(text="Bot running")
+# ==================== RENDER INTERFEKSI VA ISHGA TUSHIRISH ====================
+async def handle(request): return web.Response(text="Bot is perfectly running on Render!")
 
 async def main():
     app = web.Application()
