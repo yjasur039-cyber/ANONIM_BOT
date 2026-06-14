@@ -5,10 +5,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiohttp import web  # Render tekin serveri porti uchun
 
-# 🤖 Bot sozlamalari (Hamma ma'lumotlar kiritilgan)
+# 🤖 Bot sozlamalari
 API_TOKEN = '8971349135:AAFQA40bJf45vQwb7Oe3yxtfQ4R-cRciDCg'
-ADMIN_ID = 6198817749  # ✅ Sizning Telegram ID raqamingiz muvaffaqiyatli ulandi!
+ADMIN_ID = 6198817749  # ✅ Sizning Telegram ID raqamingiz
 
 # Logging (Bot ishini konsolda kuzatish uchun)
 logging.basicConfig(level=logging.INFO)
@@ -144,9 +145,24 @@ async def forward_to_admin(message: types.Message):
         await message.answer("🤫 Bu maxfiy anonim bot. Hozircha siz bilan hech kim aloqaga chiqqani yo'q.")
 
 
-# Botni yurgizish
+# ==================== RENDER TEKIN PORTI VA BOTNI ISHGA TUSHIRISH ====================
+
+# Render tekin xizmati so'raydigan mini veb-sahifa funksiyasi
+async def handle(request):
+    return web.Response(text="Bot is running completely free on Render!")
+
 async def main():
     print("🚀 Bot muvaffaqiyatli ishga tushdi...")
+    
+    # Render tekin serverini aldaydigan orqa fon portini yoqamiz
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    asyncio.create_task(site.start())
+    
+    # Bot pollingini ishga tushirish
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
